@@ -1,0 +1,8 @@
+ZCode Coordinator
+Copyright 2026 Junhua
+
+Original implementation inspired by the workflow of openai/codex-plugin-cc.
+No reference-plugin or ZCode executable source code is redistributed in this package.
+The Apache-2.0 license is supplied for this original package. Source inspection and
+references do not imply endorsement by OpenAI or Z.ai. The installed ZCode binary
+and its own license remain separate dependencies.

@@ -1,0 +1,22 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "zcode-coordinator",
+  "version": "0.2.0",
+  "description": "Delegate bounded local coding tasks from Codex to ZCode with durable jobs and review evidence.",
+  "license": "Apache-2.0",
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "ZCode Coordinator",
+        "shortDescription": "Tracked local ZCode delegation",
+        "category": "Coding",
+        "capabilities": [
+          "Read",
+          "Write"
+        ]
+      }
+    }
+  },
+  "repository": "https://github.com/junhua/zcode-in-codex-plugin",
+  "homepage": "https://github.com/junhua/zcode-in-codex-plugin"
+}
