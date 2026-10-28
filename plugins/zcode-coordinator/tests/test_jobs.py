@@ -6,6 +6,9 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import shutil
+import datetime as dt
+from unittest.mock import patch
 import time
 import unittest
 
@@ -23,6 +26,13 @@ class JobsTest(unittest.TestCase):
         (self.repo/'seed.txt').write_text('synthetic only\n');self.git('add','.');self.git('commit','-qm','seed')
         self.prompt=self.root/'bounded prompt.txt';self.prompt.write_text('Make one synthetic edit. CASE_OK')
         self.started=[]
+        self.scripts=self.root/'test-runtime';shutil.copytree(WRAPPER.parent,self.scripts,ignore=shutil.ignore_patterns('__pycache__','*.pyc'))
+        self.clock=self.scripts/'clock.txt';self.clock.write_text('2026-01-01T00:00:00+00:00')
+        policy=self.scripts/'policy.py';body=policy.read_text();body=body.replace('return dt.datetime.now(dt.timezone.utc)',"return dt.datetime.fromisoformat(__import__('pathlib').Path(__file__).with_name('clock.txt').read_text())");policy.write_text(body)
+        bundle=self.root/'fake-app/Contents/Resources/glm/zcode.cjs';bundle.parent.mkdir(parents=True);bundle.write_text('synthetic bundle marker')
+        catalog={'config':{'providerConfigRules':{'providerRules':[{'providerId':'account:zai-individual-coding-plan','config':{'access':{'type':'zhipu-account'},'api':{'type':'anthropic-messages'}}}]},'modelConfigRules':{'builtinProviderModelRules':[{'providerId':'account:zai-individual-coding-plan','modelId':m,'config':{'enabled':True}} for m in ['GLM-5.3','GLM-5.3-Flash']],'modelRules':[{'modelMatch':'.*','config':{'optionSpecs':{'reasoningLevel':{'values':['low','high','max']}}}}],'modelApiRules':[{'modelMatch':'.*','apiTypeMatch':'anthropic-messages','config':{'optionSpecs':{'reasoningLevel':{'map':'{"thinking":{"type":"enabled"},"output_config":{"effort":reasoningLevel}}'}}}}]}}}
+        cp=bundle.parent.parent/'config/provider/zcode-builtin.json';cp.parent.mkdir(parents=True);cp.write_text(json.dumps(catalog))
+        self.wrapper=self.scripts/'zcode_job.py';self.wrapper.write_text(self.wrapper.read_text().replace(jobs.BUNDLE,str(bundle)))
     def tearDown(self):
         for jid in self.started:
             try:
@@ -34,12 +44,16 @@ class JobsTest(unittest.TestCase):
     def git(self,*args):
         return subprocess.run(['git','-C',str(self.repo),*args],check=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True).stdout
     def call(self,*args,ok=True):
-        p=subprocess.run([sys.executable,str(WRAPPER),'--state',str(self.state),*map(str,args)],capture_output=True,text=True)
+        args=list(args)
+        if args and args[0] in {'delegate','resume'}:
+            args+=['--task-kind','routine','--complexity','bounded','--risk','normal']
+            if args[0]=='delegate':args+=['--provider-id','account:zai-individual-coding-plan']
+        p=subprocess.run([sys.executable,str(self.wrapper),'--state',str(self.state),*map(str,args)],capture_output=True,text=True)
         if ok and p.returncode: self.fail(p.stderr)
         return json.loads(p.stdout if p.stdout else p.stderr)
-    def start(self,case='CASE_OK',timeout=10):
+    def start(self,case='CASE_OK',timeout=10,extra_cli=(),mode='edit'):
         p=self.root/(case+str(time.time_ns())+'.txt');p.write_text('Change a synthetic file. '+case)
-        j=self.call('delegate','--repo',self.repo,'--task-id','fixture-'+case,'--prompt-file',p,'--timeout',timeout,'--cli-json',json.dumps([sys.executable,str(FAKE)]))
+        j=self.call('delegate','--repo',self.repo,'--task-id','fixture-'+case,'--prompt-file',p,'--timeout',timeout,'--cli-json',json.dumps([sys.executable,str(FAKE),*extra_cli]),'--mode',mode)
         self.started.append(j['id']);return j['id']
     def wait(self,jid,seconds=15):
         end=time.monotonic()+seconds
@@ -55,19 +69,84 @@ class JobsTest(unittest.TestCase):
             if j.get('child_identity'):return j
             time.sleep(.05)
         self.fail('job did not start')
+    def wait_path(self,path,seconds=5):
+        end=time.monotonic()+seconds
+        while time.monotonic()<end:
+            if path.exists():return
+            time.sleep(.02)
+        self.fail('fixture marker did not appear')
+    def test_peak_blocks_before_repo_or_cli(self):
+        self.clock.write_text('2026-01-01T06:00:00+00:00')
+        r=self.call('delegate','--repo','/missing','--task-id','peak','--prompt-file','/missing','--timeout','1',ok=False)
+        self.assertEqual(r['status'],'peak_blocked');self.assertEqual(r['policy']['reason'],'peak_window')
+        self.assertFalse((self.state/'worktrees').exists())
+    def test_status_doctor_result_route_allowed_in_peak(self):
+        jid=self.start();self.wait(jid);self.clock.write_text('2026-01-01T06:00:00+00:00')
+        self.assertEqual(self.call('status',jid)['status'],'completed')
+        self.assertEqual(self.call('result',jid)['id'],jid)
+        self.assertTrue(self.call('doctor','--cli-json',json.dumps([sys.executable,str(FAKE)]))['peak_policy']['excluded'])
+        self.assertEqual(self.call('route','--task-kind','mechanical','--complexity','simple')['effort'],'low')
+        self.assertNotIn('policy',self.call('cancel',jid,ok=False))
+    def test_resume_peak_block_then_eighteen_allowed(self):
+        jid=self.start();self.wait(jid);self.clock.write_text('2026-01-01T09:59:59+00:00')
+        self.assertEqual(self.call('resume',jid,'--prompt-file',self.prompt,ok=False)['status'],'peak_blocked')
+        self.assertEqual(self.call('status',jid)['attempt'],1)
+        self.clock.write_text('2026-01-01T10:00:00+00:00')
+        self.call('resume',jid,'--prompt-file',self.prompt);self.assertEqual(self.wait(jid)['attempt'],2)
+    def test_active_boundary_stops_and_retains_work(self):
+        self.clock.write_text('2026-01-01T05:58:00+00:00')
+        jid=self.start('CASE_SLEEP',20);j=self.running(jid)
+        partial=Path(j['worktree'])/'partial.txt';self.wait_path(partial)
+        self.clock.write_text('2026-01-01T05:59:00+00:00')
+        j=self.wait(jid);self.assertEqual(j['status'],'peak_interrupted',j)
+        self.assertTrue(partial.exists());self.assertFalse(j['checkpoint']['automatic_resume'])
+        self.assertTrue(j['cooperative_stop']['requested']);self.assertEqual(j['remaining_group_pids'],[])
+    def test_async_admission_races_never_send(self):
+        for flag,marker in [('--fixture-slow-prepare','prepare-marker'),('--fixture-slow-subscribe','subscribe-marker')]:
+            self.clock.write_text('2026-01-01T05:58:00+00:00')
+            jid=self.start(extra_cli=[flag]);j=self.running(jid);runtime=self.state/jid/'runtime'
+            self.wait_path(runtime/marker);self.clock.write_text('2026-01-01T06:00:00+00:00')
+            j=self.wait(jid);self.assertIn(j['status'],['peak_interrupted','peak_blocked'])
+            self.assertFalse((runtime/'fixture-send-marker').exists())
+    def test_unknown_or_mismatched_effective_route_never_sends(self):
+        for flag in ['--fixture-unknown-route','--fixture-unknown-effort','--fixture-mismatch-route','--fixture-effort-mismatch','--fixture-mode-mismatch']:
+            jid=self.start(extra_cli=[flag],mode='plan');j=self.wait(jid)
+            self.assertEqual(j['status'],'failed',j);self.assertIsNone(j['effective_route'])
+            self.assertFalse((self.state/jid/'runtime/fixture-send-marker').exists())
+    def test_session_and_workspace_scope_refused_before_send(self):
+        for flag in ['--fixture-workspace-mismatch','--fixture-host-id-mismatch']:
+            flags=[flag]+(['--fixture-host-preferences'] if flag=='--fixture-host-id-mismatch' else [])
+            jid=self.start(extra_cli=flags);j=self.wait(jid)
+            self.assertEqual(j['status'],'failed');self.assertFalse((self.state/jid/'runtime/fixture-send-marker').exists())
+        jid=self.start(extra_cli=['--fixture-resume-id-mismatch']);j=self.wait(jid)
+        self.assertEqual(j['status'],'completed');self.call('resume',jid,'--prompt-file',self.prompt);j=self.wait(jid)
+        self.assertEqual(j['status'],'failed');self.assertEqual((self.state/jid/'runtime/fixture-send-marker').read_text(),'1')
+    def test_known_host_preferences_are_restricted_and_unknown_requests_refused(self):
+        jid=self.start(extra_cli=['--fixture-host-preferences']);self.assertEqual(self.wait(jid)['status'],'completed')
+        jid=self.start(extra_cli=['--fixture-host-unsupported']);j=self.wait(jid)
+        self.assertEqual(j['status'],'failed');self.assertFalse((self.state/jid/'runtime/fixture-send-marker').exists())
+    def test_terminal_requires_correlated_accepted_input(self):
+        jid=self.start(extra_cli=['--fixture-terminal-before-rejected-ack']);j=self.wait(jid)
+        self.assertEqual(j['status'],'failed');self.assertFalse((Path(j['attempt_path'])/'result.json').exists())
+        jid=self.start(extra_cli=['--fixture-terminal-before-accepted-ack']);j=self.wait(jid)
+        self.assertEqual(j['status'],'completed');self.assertTrue(j['input_id']);self.assertEqual(j['turn_id'],'turn-fixture')
+        jid=self.start(extra_cli=['--fixture-stale-terminal']);j=self.wait(jid)
+        self.assertEqual(j['status'],'completed');self.assertNotEqual(self.call('result',jid)['result']['response'],'stale')
+    def test_malformed_protocol_field_types(self):
+        j=self.wait(self.start(extra_cli=['--fixture-malformed-frame']));self.assertEqual(j['status'],'protocol_error')
     def test_success_result_traceability_spaces(self):
         jid=self.start();j=self.wait(jid);self.assertEqual(j['status'],'completed',j)
-        r=self.call('result',jid);self.assertEqual(r['session_id'],'sess_fixture-123');self.assertEqual(r['exit_status'],0)
+        r=self.call('result',jid);self.assertTrue(r['session_id'].startswith('sess_'));self.assertEqual(r['exit_status'],0)
         self.assertIn('?? answer.txt',r['changed_files']);self.assertEqual((self.repo/'seed.txt').read_text(),'synthetic only\n')
         self.assertFalse((self.repo/'answer.txt').exists());self.assertTrue(Path(j['report_path']).exists())
         self.assertIn('unknown.future.event',(Path(j['attempt_path'])/'stdout.log').read_text())
     def test_failure(self):
-        j=self.wait(self.start('CASE_FAIL'));self.assertEqual(j['status'],'failed');self.assertEqual(j['exit_status'],9)
+        j=self.wait(self.start('CASE_FAIL'));self.assertEqual(j['status'],'failed');self.assertEqual(j['exit_status'],2)
     def test_auth_failure_redaction(self):
         j=self.wait(self.start('CASE_AUTH'));self.assertEqual(j['status'],'failed')
         log=(Path(j['attempt_path'])/'stderr.log').read_text();self.assertIn('REDACTED',log);self.assertNotIn('fake-secret',log)
     def test_timeout(self):
-        j=self.wait(self.start('CASE_SLEEP',1));self.assertEqual(j['status'],'timed_out');self.assertLess(j['exit_status'],0)
+        j=self.wait(self.start('CASE_SLEEP',1));self.assertEqual(j['status'],'timed_out');self.assertIsNotNone(j['exit_status'])
     def test_selection_catalog_validation(self):
         catalog={'config':{'providerConfigRules':{'providerRules':[{'providerId':'account:fixture','config':{'access':{'type':'zhipu-account'}}}]},'modelConfigRules':{'builtinProviderModelRules':[{'providerId':'account:fixture','modelId':'FixtureModel','config':{'enabled':True}}],'modelRules':[{'modelMatch':'.*','config':{'optionSpecs':{'reasoningLevel':{'values':['low','high']}}}}]}}}
         selection={'providerId':'account:fixture','modelId':'FixtureModel','options':{'reasoningLevel':'low'}}
@@ -89,7 +168,7 @@ class JobsTest(unittest.TestCase):
     def test_selection_pair_required_and_bundle_verified(self):
         import argparse
         cli={'argv':[sys.executable,str(FAKE)]}
-        for args in [argparse.Namespace(provider_id='provider',model_id=None,reasoning_level=None),argparse.Namespace(provider_id=None,model_id=None,reasoning_level='low'),argparse.Namespace(provider_id='provider',model_id='model',reasoning_level=None)]:
+        for args in [argparse.Namespace(provider_id='provider',model_id=None,reasoning_level=None,task_kind='routine',complexity='bounded',risk='normal'),argparse.Namespace(provider_id=None,model_id=None,reasoning_level='low',task_kind='routine',complexity='bounded',risk='normal'),argparse.Namespace(provider_id='provider',model_id='model',reasoning_level=None,task_kind='routine',complexity='bounded',risk='normal')]:
             with self.assertRaises(jobs.JobError):jobs.job_selection(args,cli)
     def test_runtime_log_watchdog(self):
         self.assertEqual(self.wait(self.start('CASE_RUNTIME_LIMIT'))['status'],'output_limit')
@@ -108,7 +187,7 @@ class JobsTest(unittest.TestCase):
     def test_resume(self):
         jid=self.start();j=self.wait(jid);self.call('resume',jid,'--prompt-file',self.prompt)
         j=self.wait(jid);self.assertEqual(j['status'],'completed');self.assertEqual(j['attempt'],2);self.assertEqual(j['spec_reference'],str(self.prompt))
-        self.assertEqual((Path(j['worktree'])/'resumed.txt').read_text(),'sess_fixture-123')
+        self.assertEqual((Path(j['worktree'])/'resumed.txt').read_text(),j['session_id'])
         self.assertTrue((self.state/jid/'attempt-1/report.json').exists())
     def test_resume_active_rejected(self):
         jid=self.start('CASE_SLEEP');self.running(jid)
@@ -117,7 +196,7 @@ class JobsTest(unittest.TestCase):
         jid=self.start();self.wait(jid);p=self.state/jid/'job.json';j=json.loads(p.read_text());j['session_id']=None;p.write_text(json.dumps(j))
         self.assertIn('no valid',self.call('resume',jid,'--prompt-file',self.prompt,ok=False)['error'])
     def test_protocol_errors(self):
-        for case in ['CASE_MALFORMED','CASE_TRUNCATED','CASE_OVERSIZE','CASE_AFTER']:
+        for case in ['CASE_MALFORMED','CASE_TRUNCATED','CASE_OVERSIZE']:
             with self.subTest(case=case):self.assertEqual(self.wait(self.start(case))['status'],'protocol_error')
     def test_tool_permission(self):
         self.assertEqual(self.wait(self.start('CASE_PERMISSION'))['status'],'needs_review')
@@ -137,6 +216,12 @@ class JobsTest(unittest.TestCase):
     def test_structured_error_events(self):
         for case in ['CASE_TOOL_ERROR','CASE_DENIED','CASE_TURN_ERROR']:
             self.assertEqual(self.wait(self.start(case))['status'],'needs_review')
+    def test_git_pointer_tampering_blocks_resume_before_git_inspection(self):
+        jid=self.start();j=self.wait(jid);pointer=Path(j['worktree'])/'.git';original=pointer.read_text()
+        try:
+            pointer.write_text('gitdir: /missing/gitdir\n')
+            self.assertIn('Git control file changed',self.call('resume',jid,'--prompt-file',self.prompt,ok=False)['error'])
+        finally:pointer.write_text(original)
     def test_write_sandbox_scope(self):
         j=self.wait(self.start('CASE_ESCAPE'));self.assertEqual(j['status'],'completed',j)
         self.assertFalse((self.repo/'escaped.txt').exists())

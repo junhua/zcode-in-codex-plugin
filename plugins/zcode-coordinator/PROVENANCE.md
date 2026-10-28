@@ -20,3 +20,11 @@ Real validation initially found the desktop provider-resource layout mismatch; u
 The normal Codex CLI reported logged in using ChatGPT. The isolated test CODEX_HOME did not have login state; that does not imply the normal CLI is unavailable. A later supported route can reuse normal authentication with `codex exec --ephemeral --ignore-user-config` and an instruction to load the local skill file, without persistent plugin registration or copying credentials. It has not been exercised here because the downstream ZCode account prerequisite remains blocked.
 
 The original package is Apache-2.0 licensed. The Apache-2.0 license text is reproduced from the reference repository; no other reference implementation code or upstream runtime is redistributed. The separate installed ZCode runtime retains its upstream notices and license.
+
+## Version 0.3.0 policy and verified protocol surface
+
+The user-required daily policy is fixed UTC+08 [14:00,18:00), including weekends, with a local 60-second shutdown buffer. It is not inferred from a vendor subscription policy. Task routing policy 2026-10-28.1 is our cost-conscious heuristic; current official model/configuration references and the transport-specific evidence are linked in ROUTING.md.
+
+The same pinned ZCode source was inspected for app-server --stdio framing, session/create/resume/send/stop/subscribe schemas, snapshot settings and workspace scope, canonical per-input modelSelection, runtime-preferences callbacks, and input/turn correlation. Version 0.3.0 uses one bounded protocol process so effective model/effort/mode is checked before task text is sent; it no longer treats a standalone headless profile as effective-route proof. It answers only the documented nonsecret runtime-preferences callback with restrictive capabilities. Unknown host methods, missing registry models or mismatched session/workspace values are refused.
+
+A real non-inference preflight reached session/create but the current account/host registry did not expose the requested Flash model. No session/send occurred. This does not prove real model execution, effort semantics or a perfect remote cancellation cutoff. Account/global settings were not changed. Historical GLM-5.2 reasoning-depth guidance was not used; current provider configuration/mapping source governs this release.

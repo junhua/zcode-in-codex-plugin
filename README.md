@@ -1,8 +1,8 @@
 # ZCode in Codex
 
-A local Codex plugin for delegating bounded coding tasks to ZCode CLI while Codex keeps responsibility for review, verification and delivery. The package includes a skill, Python supervisor, durable job registry, isolated Git worktrees, bounded output and macOS write-sandbox controls. It provides setup/doctor, delegate, status, result, resume and cancel commands.
+A local Codex plugin for delegating bounded coding tasks to ZCode CLI while Codex keeps responsibility for review, verification and delivery. The package includes a skill, Python supervisor, durable job registry, isolated Git worktrees, bounded output and macOS write-sandbox controls. It provides setup/doctor, local task routing, delegate, status, result, resume and cancel commands. It excludes inference starts daily from 14:00–18:00 GMT+8 and applies explicit GLM-5.3/Flash effort routing.
 
-**Version 0.2.0 is fixture-tested; real model execution remains blocked by standalone ZCode account setup.** The installed desktop credentials did not include the account-link metadata required by the standalone CLI. Selecting a model in a disposable profile did not bypass that requirement. No successful real editing, resume or cancellation is claimed. See the [live test status and exact setup steps](plugins/zcode-coordinator/README.md#live-test-status-and-model-setup).
+**Version 0.3.0 is fixture-tested; real model execution remains blocked by standalone ZCode account setup.** The runtime must expose the exact requested route in a same-process session snapshot before any task text is submitted. The inspected account/host registry did not expose the requested model; no fallback or credential copying was used. No successful real editing, resume or cancellation is claimed. See the [live test status and exact setup steps](plugins/zcode-coordinator/README.md#current-live-readiness-and-setup).
 
 ## Install
 
@@ -18,6 +18,8 @@ Reload plugins or start a new Codex task if the host requires it. These commands
 Ask Codex:
 
 > Use $zcode to implement this bounded task in my authorized repository. Review its diff, run verification yourself and return the job report before integrating.
+
+The [routing matrix and current official research](plugins/zcode-coordinator/ROUTING.md) is a cost-conscious heuristic, not a proven optimum. The daily UTC+08 policy includes weekends and is independent of machine timezone/vendor off-peak plans. Active work is cooperatively stopped with a conservative buffer and partial artifacts retained. See the cancellation limits in the usage guide.
 
 The [usage guide](plugins/zcode-coordinator/README.md) describes exact wrapper commands, job-local model selection, supported setup and known limits. State and artifacts remain local. No cloud server or MCP server is required.
 

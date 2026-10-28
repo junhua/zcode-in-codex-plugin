@@ -1,6 +1,6 @@
 {
   "name": "zcode-coordinator",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Delegate bounded local coding tasks from Codex to ZCode with durable jobs and review evidence.",
   "license": "Apache-2.0",
   "skills": "./skills/",

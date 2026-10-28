@@ -17,7 +17,10 @@ import sys
 import time
 import uuid
 
-VERSION = '0.2.0'
+sys.path.insert(0,str(Path(__file__).resolve().parent))
+from policy import POLICY_VERSION,PolicyError,admit,boundary_due,route,window,utc_now,verify_snapshot
+
+VERSION = '0.3.0'
 ACTIVE = {'starting', 'running', 'cancelling'}
 MAX_LOG = 1024 * 1024
 MAX_LINE = 256 * 1024
@@ -152,7 +155,7 @@ def capability(argv):
 def doctor(args):
     try:
         info = capability(resolve_cli(args.cli_json))
-        info.update({'wrapper_version': VERSION, 'ready_for_probe': True, 'process_inspection': bool(identity(os.getpid())), 'modes': ['edit', 'plan'],
+        info.update({'peak_policy':window(),'routing_policy_version':POLICY_VERSION,'route_verification':'same-process app-server session snapshot; unsupported/missing effective route fails before session/send','wrapper_version': VERSION, 'ready_for_probe': True, 'process_inspection': bool(identity(os.getpid())), 'modes': ['edit', 'plan'],
                      'cancel': 'owned process-group SIGTERM then SIGKILL; detached descendants outside group are not guaranteed',
                      'limits': 'macOS write sandbox required. Bash removed; isolated HOME disables user extensions. Read access and provider network are not isolated; use only authorized repositories.'})
         return info
@@ -189,17 +192,44 @@ def validate_model_selection(selection, catalog):
     return dict(selection)
 
 def job_selection(args, cli):
+    decision=route(args.task_kind,args.complexity,args.risk)
+    if args.model_id and args.model_id!=decision['model_id']:raise JobError('Explicit model differs from task routing policy; revise the classification with evidence, not a blind override')
+    if args.reasoning_level and args.reasoning_level!=decision['effort']:raise JobError('Explicit effort differs from task routing policy; revise the classification with evidence')
+    args.model_id=decision['model_id'];args.reasoning_level=decision['effort']
+    if not args.provider_id:raise JobError('An existing built-in --provider-id is required; no provider/default is selected silently')
     if not args.provider_id and not args.model_id:
         if args.reasoning_level:raise JobError('--reasoning-level requires --provider-id and --model-id')
         return None
     if not args.provider_id or not args.model_id:
         raise JobError('--provider-id and --model-id must be supplied together')
-    if BUNDLE not in cli['argv']:
-        raise JobError('per-job model selection currently requires the verified desktop bundle; no runtime path is guessed')
+    if not Path(BUNDLE).is_file():
+        raise JobError('the verified desktop catalog is unavailable; use the supported ZCode bundle/configuration, no route can be proven')
     catalog=read(Path(BUNDLE).parent.parent/'config/provider/zcode-builtin.json')
     selection={'providerId':args.provider_id,'modelId':args.model_id}
     if args.reasoning_level:selection['options']={'reasoningLevel':args.reasoning_level}
-    return validate_model_selection(selection,catalog)
+    selected=validate_model_selection(selection,catalog)
+    provider=next(v for v in catalog['config']['providerConfigRules']['providerRules'] if v.get('providerId')==selected['providerId'])
+    transport=provider.get('config',{}).get('api',{}).get('type')
+    mapping=None
+    for rule in catalog['config']['modelConfigRules'].get('modelApiRules',[]):
+        if re.fullmatch(rule.get('modelMatch','a^'),selected['modelId'],re.I) and re.fullmatch(rule.get('apiTypeMatch','a^'),transport or '',re.I):
+            value=rule.get('config',{}).get('optionSpecs',{}).get('reasoningLevel',{}).get('map')
+            if value is not None:mapping=value
+    for section in ['providerSiteRules','templateModelRules','providerModelRules','manualProviderModelRules','builtinProviderModelRules']:
+        for rule in catalog['config']['modelConfigRules'].get(section,[]):
+            if rule.get('providerId') not in {None,selected['providerId']}:continue
+            if section=='templateModelRules' and rule.get('templateId')!=provider.get('config',{}).get('templateId'):continue
+            if rule.get('apiTypeMatch') and not re.fullmatch(rule['apiTypeMatch'],transport or '',re.I):continue
+            if rule.get('baseUrlMatch') and not re.fullmatch(rule['baseUrlMatch'],provider.get('config',{}).get('api',{}).get('baseUrl',''),re.I):continue
+            override=rule.get('config',{}).get('optionSpecs',{}).get('reasoningLevel')
+            if not override:continue
+            matches=(rule.get('modelId')==selected['modelId']) if 'modelId' in rule else bool(re.fullmatch(rule.get('modelMatch','.*'),selected['modelId'],re.I))
+            if matches:raise JobError('Later catalog reasoning override is unverified; inspect provider configuration before inference')
+    expected='{"thinking":{"type":"enabled"},"output_config":{"effort":reasoningLevel}}'
+    if transport!='anthropic-messages' or not isinstance(mapping,str) or re.sub(r'\s','',mapping)!=expected:
+        raise JobError('Installed provider transport/effort mapping is not verified; no inference will be submitted; inspect supported ZCode provider configuration')
+    cli['route_catalog_evidence']={'catalog_sha256':hashlib.sha256(json.dumps(catalog,sort_keys=True).encode()).hexdigest(),'transport':transport,'map_sha256':hashlib.sha256(mapping.encode()).hexdigest(),'mapping':'thinking enabled; output_config.effort explicitly set','api_defaults':'not used; effort always explicit'}
+    return selected
 
 def prompt_text(path):
     p = Path(path).expanduser().resolve(strict=True)
@@ -217,16 +247,24 @@ def check_project_inputs(worktree):
             if (parent / relative).exists() or (parent / relative).is_symlink():
                 raise JobError('execution refused: project/ancestor runtime input requires review: ' + str(parent / relative))
 
+def verify_worktree(job):
+    control=Path(job['worktree'])/'.git'
+    if control.is_symlink() or not control.is_file() or hashlib.sha256(control.read_bytes()).hexdigest()!=job.get('worktree_git_control_sha256'):
+        raise JobError('worktree Git control file changed; trusted Git inspection/resume refused')
+
 def launch(root, job, text):
+    job['peak_policy']=admit(job['timeout_seconds'])
+    job['stop_deadline']=job['peak_policy']['stop_deadline']
     check_project_inputs(Path(job['worktree']))
     attempt = job['attempt']
     directory = root / job['id'] / f'attempt-{attempt}'
     directory.mkdir(mode=0o700)
     (directory / 'prompt.txt').write_text(text)
     os.chmod(directory / 'prompt.txt', 0o600)
+    for stale in ['cooperative_stop','peak_block','checkpoint','interruption_reason','interruption_policy']:job.pop(stale,None)
     job.update(status='starting', created_epoch=time.time(), started_at=now(), ended_at=None,
                worker_pid=None, worker_identity=None, child_pid=None, exit_status=None,
-               blockers=[], attempt_path=str(directory), changed_files=[], final_commits=[])
+               effective_route=None,route_verification=None,inference_submission_state='not_attempted',blockers=[], attempt_path=str(directory), changed_files=[], final_commits=[])
     save(root / job['id'] / 'job.json', job)
     token = uuid.uuid4().hex
     job['worker_token'] = token
@@ -240,6 +278,7 @@ def launch(root, job, text):
             'worktree': job['worktree'], 'report_path': str(directory / 'report.json')}
 
 def start(args, root):
+    admit(args.timeout)
     prompt_path, text = prompt_text(args.prompt_file)
     repo = Path(args.repo).expanduser().resolve(strict=True)
     if git(repo, 'rev-parse', '--show-toplevel') != str(repo):
@@ -255,19 +294,24 @@ def start(args, root):
         worktrees = root / 'worktrees'; worktrees.mkdir(exist_ok=True, mode=0o700)
         wt = worktrees / jid
         git(repo, 'worktree', 'add', '--detach', str(wt), sha)
-        job = {'schema': 1, 'id': jid, 'task_id': args.task_id, 'spec_reference': str(prompt_path),
+        git_control=wt/'.git'
+        job = {'worktree_git_control_sha256':hashlib.sha256(git_control.read_bytes()).hexdigest(),'schema': 1, 'id': jid, 'task_id': args.task_id, 'spec_reference': str(prompt_path),
                'spec_sha256': hashlib.sha256(text.encode()).hexdigest(), 'repo': str(repo),
                'worktree': str(wt), 'base_ref': args.base, 'base_sha': sha,
                'source_branch': git(repo, 'branch', '--show-current'), 'cli': cli,
                'mode': args.mode, 'timeout_seconds': args.timeout, 'session_id': None,
-               'configured_model': selected_model(selection) or cli.get('model'), 'model_selection':selection, 'attempt': 1, 'tests': [], 'parent_job': None}
+               'wrapper_version':VERSION,'routing_policy':route(args.task_kind,args.complexity,args.risk),'requested_route':selected_model(selection),'configured_model': selected_model(selection), 'model_selection':selection, 'attempt': 1, 'tests': [], 'parent_job': None}
         return launch(root, job, text)
 
 def resume(args, root):
+    # Admission precedes reconciliation or any session/runtime action.
+    admit(1)
     spec_path, text = prompt_text(args.prompt_file)
     with lock(root):
         directory = job_path(root, args.id)
         job = reconcile(root, read(directory / 'job.json'))
+        admit(job['timeout_seconds'])
+        if not job.get('routing_policy') or not job.get('model_selection'):raise JobError('Legacy job lacks a verified task route; start a new classified task instead of resuming an unknown route')
         if job['status'] in ACTIVE:
             raise JobError('job is active; wait or cancel first')
         if job['status'] in {'interrupted','cleanup_required'}:
@@ -277,8 +321,12 @@ def resume(args, root):
             except BlockingIOError: raise JobError('previous supervisor is finishing; resume was not started, retry shortly')
         if not job.get('session_id'):
             raise JobError('resume unsupported for this job: no valid ZCode session ID was observed')
+        verify_worktree(job)
         if not Path(job['worktree']).is_dir():
             raise JobError('original worktree missing')
+        decision=route(args.task_kind,args.complexity,args.risk)
+        if decision['model_id']!=job['model_selection']['modelId'] or decision['effort']!=job['model_selection']['options']['reasoningLevel']:raise JobError('Follow-up requires a different task route; start a new bounded job, not a silently switched session')
+        job['routing_policy']=decision
         job['cli'] = capability(job['cli']['argv'])
         job['configured_model'] = selected_model(job.get('model_selection')) or job['cli'].get('model')
         if job.get('model_selection'):
@@ -308,12 +356,11 @@ def child_environment(job, root):
     home = control / 'home'; config_dir = home / '.zcode' / 'cli'
     config_dir.mkdir(parents=True,exist_ok=True,mode=0o700)
     save(config_dir / 'config.json', {'features':{'mcp':False,'subagent':False,'memory':False,'skill':False},'plugins':{'enabled':False},'skills':{'enabled':False},'hooks':{'enabled':False},'memory':{'use':False}})
-    if BUNDLE in job['cli']['argv']:
+    if Path(BUNDLE).is_file():
         builtin=Path(BUNDLE).parent.parent/'config/provider/zcode-builtin.json'
         personal=Path(original_home)/'.zcode/v2/provider_config.json'
-        if builtin.is_file() and personal.is_file():
-            env['ZCODE_BUILTIN_PROVIDER_CONFIG_FILE']=str(builtin)
-            env['ZCODE_PERSONAL_PROVIDER_CONFIG_FILE']=str(personal)
+        if builtin.is_file():env['ZCODE_BUILTIN_PROVIDER_CONFIG_FILE']=str(builtin)
+        if personal.is_file():env['ZCODE_PERSONAL_PROVIDER_CONFIG_FILE']=str(personal)
     if job.get('model_selection'):
         # Selection-only profile: no user config or credential bytes are copied.
         profile=control/'selected-provider.json'
@@ -324,21 +371,26 @@ def child_environment(job, root):
     return env
 
 def terminate_owned(child, birth):
-    if child.poll() is not None:
-        return
-    if not birth or identity(child.pid) != birth or os.getpgid(child.pid) != child.pid:
-        raise JobError('child ownership check failed; cancellation refused')
-    os.killpg(child.pid, signal.SIGTERM)
-    # Keep the owned leader unreaped so its PID/PGID cannot be reused during cleanup.
-    time.sleep(0.5)
-    try: os.killpg(child.pid, signal.SIGKILL)
-    except ProcessLookupError: pass
+    if child.returncode is not None:return
+    members=group_live(child.pid)
+    if members is None:raise JobError('process group inspection unavailable; cleanup refused')
+    if not members:
+        try:child.wait(timeout=0);return
+        except subprocess.TimeoutExpired:raise JobError('owned process absent from group inspection')
+    if not birth or identity(child.pid)!=birth:raise JobError('child ownership check failed; cancellation refused')
+    try:
+        if os.getpgid(child.pid)!=child.pid:raise JobError('owned process group changed')
+    except ProcessLookupError:
+        # Darwin cannot query a zombie leader's PGID. The unreaped Popen PID and
+        # matching UID/start identity reserve its original newly-created group ID.
+        pass
+    try:os.killpg(child.pid,signal.SIGTERM)
+    except ProcessLookupError:child.wait(timeout=3);return
+    time.sleep(.5)
+    try:os.killpg(child.pid,signal.SIGKILL)
+    except ProcessLookupError:pass
     except PermissionError:
-        # Darwin can return EPERM for a process group containing only a dead leader.
-        child.wait(timeout=0)
-        members=run(['ps','-axo','pgid=,stat='])
-        if members.returncode or any(row.split()[0]==str(child.pid) and not row.split()[1].startswith('Z') for row in members.stdout.splitlines() if len(row.split())>=2):
-            raise JobError('group cleanup not confirmed')
+        if group_live(child.pid):raise JobError('group cleanup not confirmed')
     child.wait(timeout=3)
 
 def worker(args, root):
@@ -360,8 +412,9 @@ def worker(args, root):
         sinks = {name: Sink(attempt / (name + '.log')) for name in ['stdout','stderr']}
         buffers = {name:b'' for name in sinks}
         deadline = time.monotonic() + job['timeout_seconds']
+        peak_monotonic=time.monotonic()+max(0,(datetime.datetime.fromisoformat(job['stop_deadline'])-utc_now()).total_seconds())
         def line(name, raw):
-            nonlocal result, malformed
+            nonlocal result, malformed, status
             text = raw.decode('utf-8', errors='replace')
             sinks[name].write(text+'\n')
             if name != 'stdout' or not text.strip(): return
@@ -373,7 +426,22 @@ def worker(args, root):
                 if isinstance(sid,str) and re.fullmatch(r'sess_[A-Za-z0-9_-]+',sid):
                     if job.get('session_id') and job['session_id'] != sid: raise ValueError('session ID changed')
                     job['session_id'] = sid
+                if event.get('type')=='policy.stopped' and event.get('reason') in {'peak_interrupted','peak_blocked','timed_out','cancelled','output_limit'}:
+                    status=event['reason']
+                if event.get('type')=='route.verified':
+                    effective=event.get('effective')
+                    expected=job['requested_route']
+                    if not isinstance(effective,dict) or any(effective.get(k)!=expected.get(k if k!='effort' else 'reasoning_level') for k in ['provider_id','model_id','effort']):raise ValueError('effective route mismatch')
+                    job['effective_route']=effective
+                    job['route_verification']={'snapshot_sha256':event.get('snapshot_sha256'),'policy_version':POLICY_VERSION,'verified_at':now()}
+                    save(directory/'job.json',job)
+                if event.get('type')=='process.exit':job['backend_exit_status']=event.get('exit_status')
+                if event.get('type')=='route.refused':
+                    job['inference_submission_state']=event.get('task_input_state','unknown')
+                    if event.get('protocol_error'):malformed=True
+                    job['blockers'].append(redact(str(event.get('reason','route verification failed')))[:1000])
                 if event.get('type') == 'result':
+                    if not job.get('effective_route'):raise ValueError('unverified result route')
                     if not isinstance(event.get('response'),str) or not job.get('session_id'):
                         raise ValueError('invalid result')
                     result = event
@@ -387,16 +455,22 @@ def worker(args, root):
         try:
             text = (attempt / 'prompt.txt').read_text()
             prompt = ('Bounded task delegated by Codex. Work only in this worktree. Do not push, merge, deploy, change permissions, create credentials, contact third parties, or start background processes. Do not use external tools, plugins, MCP, workflows or subagents. Do not commit. Return changed files, tests actually executed with results, and blockers. If approvals block work, report it.\n\n' + text)
-            argv = job['cli']['argv'] + ['--prompt',prompt,'--cwd',job['worktree'],'--mode',job['mode'],
-                '--output-format','stream-json','--workflow-mode','disabled','--no-color','--disallowed-tools',DISALLOWED]
-            if job.get('session_id'): argv += ['--resume', job['session_id']]
+            admit(job['timeout_seconds'])
+            env=child_environment(job,root)
+            control=directory/'control'
+            request={'id':job['id'],'cli':job['cli']['argv'],'worktree':job['worktree'],'mode':job['mode'],
+                     'selection':job['model_selection'],'session_id':job.get('session_id'),'timeout_seconds':job['timeout_seconds'],
+                     'stop_deadline':job['stop_deadline'],'stop_path':str(attempt/'stop.request'),'disallowed':DISALLOWED,'prompt':prompt}
+            save(control/'protocol-request.json',request)
+            argv=[sys.executable,str(Path(__file__).with_name('protocol_bridge.py')),str(control/'protocol-request.json')]
             if sys.platform != 'darwin' or not Path('/usr/bin/sandbox-exec').exists():
                 raise JobError('This release requires macOS sandbox-exec; execution is unsupported on this host')
             # Credential/provider files can be read but cannot be changed; file writes stay in job scope.
             check_project_inputs(Path(job['worktree']))
-            profile = '(version 1)(allow default)(deny file-write*)(allow file-write* (subpath ' + json.dumps(str(root / job['id'] / 'runtime')) + ') (subpath ' + json.dumps(job['worktree']) + ') (literal \"/dev/null\"))'
+            profile = '(version 1)(allow default)(deny file-write*)(allow file-write* (subpath ' + json.dumps(str(root / job['id'] / 'runtime')) + ') (subpath ' + json.dumps(job['worktree']) + ') (literal \"/dev/null\"))(deny file-write* (literal '+json.dumps(str(Path(job['worktree'])/'.git'))+'))'
             argv = ['/usr/bin/sandbox-exec','-p',profile] + argv
-            child = subprocess.Popen(argv,cwd=job['worktree'],env=child_environment(job,root),
+            admit(job['timeout_seconds'])
+            child = subprocess.Popen(argv,cwd=job['worktree'],env=env,
                      stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,start_new_session=True)
             birth = identity(child.pid)
             job.update(child_pid=child.pid,child_identity=birth)
@@ -417,8 +491,17 @@ def worker(args, root):
                             if path.is_file() and not path.is_symlink(): total += path.stat().st_size
                         except FileNotFoundError: pass
                         if total > MAX_RUNTIME: runtime_exceeded = True; break
-                reason = 'cancelled' if cancel.exists() else ('timed_out' if time.monotonic()>=deadline else ('output_limit' if runtime_exceeded else None))
+                peak_due=boundary_due(job['stop_deadline']) or time.monotonic()>=peak_monotonic
+                reason = 'peak_interrupted' if peak_due else ('cancelled' if cancel.exists() else ('timed_out' if time.monotonic()>=deadline else ('output_limit' if runtime_exceeded else None)))
                 if reason:
+                    status=reason
+                    job['interruption_reason']=reason
+                    if reason=='peak_interrupted':job['interruption_policy']=window()
+                    if child.returncode is None:
+                        save(attempt/'stop.request',{'reason':reason,'at':now()})
+                        job['cooperative_stop']={'requested':True,'method':'session/stop','reason':reason,'at':now()}
+                        # Keep the owned leader unreaped during cooperative stop, preventing PGID reuse.
+                        time.sleep(2)
                     terminate_owned(child,birth); status=reason
                     # Drain only for a bounded time; inherited pipe FDs must not hang the supervisor.
                     eof_deadline = eof_deadline or time.monotonic()+2
@@ -436,16 +519,18 @@ def worker(args, root):
             for name,buf in buffers.items():
                 if buf: line(name,buf)
             job['exit_status']=child.wait(timeout=3)
-            if status not in {'cancelled','timed_out','output_limit'}:
-                if job['exit_status'] != 0: status='failed'
+            if status not in {'cancelled','timed_out','output_limit','peak_interrupted','peak_blocked'}:
+                if malformed:status='protocol_error'
+                elif job['exit_status'] != 0: status='failed'
                 elif malformed or result is None: status='protocol_error'
                 elif errors: status='needs_review'
                 else: status='completed'
             if status in {'failed','protocol_error'}:
                 job['blockers'].append('CLI failed or final stream was missing/malformed; inspect stdout/stderr evidence')
-            if status in {'timed_out','cancelled','output_limit'}:
+            if status in {'timed_out','cancelled','output_limit','peak_interrupted'}:
                 job['blockers'].append('Process group terminated. Review partial edits; cancellation is not rollback.')
         except Exception as e:
+            if isinstance(e,PolicyError):status='peak_blocked';job['peak_block']=e.detail
             job['blockers'].append(redact(str(e))[:1000])
             if child is not None and child.poll() is None:
                 try: terminate_owned(child,job.get('child_identity'))
@@ -455,6 +540,7 @@ def worker(args, root):
         finally:
             for sink in sinks.values(): sink.close()
         if child is not None:
+            job['exit_status']=child.poll()
             remaining=group_live(child.pid)
             job['remaining_group_pids']=remaining
             if remaining is None or remaining:
@@ -465,21 +551,28 @@ def worker(args, root):
         if result:
             safe_result=redacted_value(result)
             save(attempt / 'result.json',safe_result)
-            job['trace_id']=result.get('traceId');job['turn_id']=result.get('turnId')
+            job['trace_id']=result.get('traceId');job['turn_id']=result.get('turnId');job['input_id']=result.get('inputId')
         try:
+            verify_worktree(job)
             job['changed_files']=git(job['worktree'],'status','--porcelain=v1','--untracked-files=all').splitlines()
             job['final_commits']=git(job['worktree'],'log','--format=%H',job['base_sha']+'..HEAD').splitlines()
             job['final_sha']=git(job['worktree'],'rev-parse','HEAD')
             patch=run(['git','-c','core.hooksPath=/dev/null','-C',job['worktree'],'diff','--no-ext-diff','--no-textconv',job['base_sha'],'--']).stdout
             (attempt / 'changes.patch').write_text(redact(patch)[:MAX_LOG])
             job['patch_truncated']=len(patch)>MAX_LOG
-        except Exception as e: job['blockers'].append(redact(str(e)))
+        except Exception as e:
+            job['blockers'].append(redact(str(e)))
+            job['review_required']=True
+            if 'Git control file changed' in str(e):job['status']='cleanup_required'
+            elif job['status']=='completed':job['status']='needs_review'
         if child is not None and child.poll() is None:
             status='cleanup_required'
             job['status']=status
             job['blockers'].append('Child may still be alive. Do not resume until manually inspected.')
         job['tests']=[{'source':'agent response','status':'unverified; read result.json; coordinator must run approved tests separately'}]
         job['report_path']=str(attempt / 'report.json')
+        if job['status'] in {'peak_interrupted','cancelled','timed_out'}:
+            job['checkpoint']={'kind':'retained local artifacts; vendor session persistence is not a transactional checkpoint','at':now(),'report_path':job['report_path'],'patch_path':str(attempt/'changes.patch'),'worktree':job['worktree'],'session_id':job.get('session_id'),'automatic_resume':False}
         save(attempt / 'report.json',job)
         save(directory / 'job.json',job)
 
@@ -492,15 +585,18 @@ def main():
     s=sub.add_parser('delegate');s.add_argument('--repo',required=True);s.add_argument('--base',default='HEAD')
     s.add_argument('--task-id',required=True);s.add_argument('--prompt-file',required=True)
     s.add_argument('--timeout',type=int,default=600);s.add_argument('--mode',choices=['edit','plan'],default='edit');s.add_argument('--cli-json');s.add_argument('--provider-id');s.add_argument('--model-id');s.add_argument('--reasoning-level')
+    s.add_argument('--task-kind',required=True,choices=['mechanical','routine','capability','debugging','architecture','ui-state','visual']);s.add_argument('--complexity',choices=['simple','bounded','hard'],default='bounded');s.add_argument('--risk',choices=['normal','ambiguous','security','data-loss','cross-service'],default='normal')
+    plan=sub.add_parser('route');plan.add_argument('--task-kind',required=True);plan.add_argument('--complexity',default='bounded');plan.add_argument('--risk',default='normal')
     for command in ['status','result','cancel']:
         t=sub.add_parser(command);t.add_argument('id')
-    r=sub.add_parser('resume');r.add_argument('id');r.add_argument('--prompt-file',required=True)
+    r=sub.add_parser('resume');r.add_argument('id');r.add_argument('--prompt-file',required=True);r.add_argument('--task-kind',required=True);r.add_argument('--complexity',default='bounded');r.add_argument('--risk',default='normal')
     t=sub.add_parser('record-test');t.add_argument('id');t.add_argument('--argv-json',required=True);t.add_argument('--exit-code',type=int,required=True);t.add_argument('--evidence-file',required=True)
     w=sub.add_parser('_worker');w.add_argument('id');w.add_argument('token')
     args=p.parse_args()
     try:
         root=state_dir(args.state)
-        if args.command in {'doctor','setup'}: output=doctor(args)
+        if args.command=='route':output=route(args.task_kind,args.complexity,args.risk)
+        elif args.command in {'doctor','setup'}: output=doctor(args)
         elif args.command=='delegate':
             if not 1<=args.timeout<=86400: raise JobError('timeout must be 1..86400 seconds')
             output=start(args,root)
@@ -534,6 +630,8 @@ def main():
                 else: output=job
         print(json.dumps(output,indent=2))
         if args.command in {'doctor','setup'} and not output['ready_for_probe']: sys.exit(2)
+    except PolicyError as e:
+        print(json.dumps({'error':str(e),'policy':e.detail,'status':'peak_blocked' if e.detail else 'route_refused'}),file=sys.stderr);sys.exit(3)
     except (JobError,OSError,ValueError,subprocess.SubprocessError) as e:
         print(json.dumps({'error':redact(str(e))}),file=sys.stderr);sys.exit(2)
 

@@ -1,61 +1,53 @@
-# ZCode Coordinator 0.2.0
+# ZCode Coordinator 0.3.0
 
-A local Codex skill and Python supervisor that delegates bounded file-editing tasks to ZCode. No MCP server, cloud hosting, credential installation, or global configuration changes are needed to build it. Codex reviews edits, executes tests and decides subsequent delivery.
+A local Codex skill, Python supervisor and bounded ZCode protocol adapter. Codex delegates a small coding task, reviews its worktree, executes verification and records evidence. No cloud host, MCP server, scheduled automation or always-on service is created.
 
 ## Install when authorized
-
-Install the published marketplace with the supported Codex CLI commands:
 
 ```sh
 codex plugin marketplace add junhua/zcode-in-codex-plugin
 codex plugin add zcode-coordinator@zcode-local
 ```
 
-For offline delivery, the companion `local-marketplace` directory is also a complete marketplace: use its absolute path instead of the GitHub source above. Keep that directory in a stable location.
+For offline delivery, use the companion local marketplace's absolute path instead of the GitHub source. Installation changes user-local Codex plugin configuration; development only installed into isolated test configurations. Global installation remains a separate user decision.
 
-Installation changes the user's local Codex plugin configuration; it was not run against the user's global configuration during development. Reload plugins or begin a new Codex task if required by the host. The standalone ZIP contains one plugin, with both portable `plugin.json` and Codex `.codex-plugin/plugin.json` metadata. A skill-only install can copy `skills/zcode` into an authorized Codex skills directory; do not copy only SKILL.md because the script is required.
+Requires macOS `sandbox-exec` and `ps`, Python 3.9+, Node for the verified desktop bundle, Codex's plugin host and a supported installed ZCode runtime/account configuration. The ZIP contains portable and Codex compatibility manifests. Keep all three runtime scripts with the skill.
 
-## Use
+## Daily no-use policy
 
-In Codex: “Use $zcode to implement the bounded task in /path/to/repo; verify and return the report before integrating.” Codex resolves the script from the installed skill and invokes:
+Inference-bearing `delegate` and `resume` are excluded **every day, including weekends, from 14:00 inclusive to 18:00 exclusive at fixed UTC+08:00 (GMT+8)**. Machine timezone and daylight-saving changes do not affect this rule. This is the user's policy, independent of vendor peak/off-peak plans.
 
-```sh
-python3 /path/to/skills/zcode/scripts/zcode_job.py --state /absolute/private/zcode-jobs doctor
-python3 /path/to/skills/zcode/scripts/zcode_job.py --state /absolute/private/zcode-jobs delegate --repo '/path/with spaces/repo' --base main --task-id DEMO-1 --prompt-file /absolute/task.txt --timeout 600
-python3 /path/to/skills/zcode/scripts/zcode_job.py --state /absolute/private/zcode-jobs status JOB_ID
-python3 /path/to/skills/zcode/scripts/zcode_job.py --state /absolute/private/zcode-jobs result JOB_ID
-python3 /path/to/skills/zcode/scripts/zcode_job.py --state /absolute/private/zcode-jobs resume JOB_ID --prompt-file /absolute/followup.txt
-python3 /path/to/skills/zcode/scripts/zcode_job.py --state /absolute/private/zcode-jobs cancel JOB_ID
-```
+A conservative 60-second shutdown buffer stops admission at 13:59. A requested timeout that would reach that deadline is rejected before CLI/session work; shorten the bounded task or return after 18:00. Responses include the reason and next allowed time. There is no waiting queue, busy polling until evening, automatic 18:00 resume, provider fallback or scheduled service.
 
-The state directory is created private (0700); existing public/shared directories are refused. Each job has a random durable ID, detached Git worktree, isolated runtime/HOME, atomic registry, and attempt directories with prompt, redacted stdout/stderr, final result, patch and consolidated JSON report. `record-test` adds a coordinator-attested argv, exit code and copied/redacted evidence with a SHA-256. It never executes agent-supplied commands. Source checkout contents are not changed. Git worktree metadata is created in the source repository; worktrees are retained for review and can later be removed using normal Git worktree management after all processes stop.
+Controller, worker and adapter recheck admission, including after asynchronous preparation and immediately before task submission. Active workers use both wall time and an initial monotonic cutoff. At the buffer boundary they request cooperative `session/stop`, then enforce bounded owned-group cleanup. Status becomes `peak_interrupted` (or `cleanup_required` if cleanup cannot be proven). Partial files, prompt, logs, report, patch and available session identity are retained as a local checkpoint; no code is discarded or rolled back. Resume requires an explicit later command and repeats all guards.
 
-## Verified interface and setup
+**Precise limit:** the provider may continue an already in-flight request after local cancellation. OS suspension, extreme scheduling delays, clock changes between checks and a write, or descendants outside/left in the owned group prevent a perfect remote billing/processing cutoff guarantee. The buffer reduces exposure; it does not turn local process cancellation into a server-side guarantee. `cleanup_required` demands prompt manual inspection and blocks resume. The adapter disables background work and allows only file tools to reduce this surface.
 
-Development used Codex CLI 0.156.1, ZCode's desktop-bundled CLI 0.17.0 and Node 26.5.0 on macOS arm64. The bundled CLI is found at `/Applications/ZCode.app/Contents/Resources/glm/zcode.cjs` if `zcode` is absent from PATH. An explicit verified argv is accepted via `--cli-json '["/absolute/node","/absolute/zcode.cjs"]'`. No shell splitting is used. A fixture argv is a test dependency, not a production ZCode identity.
+`doctor`, `status`, `result`, `cancel`, local `route` planning and inspection remain available during the excluded window. Doctor uses non-inference help/version checks; it does not test account access by issuing a model request.
 
-The wrapper probes actual `--version` and parser acceptance of `--help --output-format stream-json --workflow-mode disabled`, checks help for prompt/cwd/mode/resume/disallowed-tools, and records the executable/bundle hash. Parser acceptance is not proof of live event behavior. The pinned upstream source documents NDJSON ending in a `type: result` record, explicit `--resume sess_...`, and signals for headless cancellation. No `--model`, `--max-turns`, `--print` or other guessed flags are used. Unknown events are retained in bounded logs; malformed/missing results fail clearly.
+## Choose a task route
 
-The installed desktop bundle needs its existing resource at `Contents/Resources/config/provider/zcode-builtin.json`, which differs from the standalone source layout. The wrapper supplies the verified `ZCODE_BUILTIN_PROVIDER_CONFIG_FILE` and `ZCODE_PERSONAL_PROVIDER_CONFIG_FILE` environment paths for that bundle without modifying those files.
-
-## Live test status and model setup
-
-Fixture tests and isolated plugin installation are validated. Real inference, code editing and session resume have not passed: the installed standalone CLI rejected initialization before producing a session/model response. This is explicitly not a successful end-to-end test.
-
-The CLI has no supported `--model` or `--settings` flag. Version 0.2.0 adds wrapper options for a **per-job selection-only profile**:
+See [ROUTING.md](ROUTING.md) for the sourced model facts, full heuristic and limitations. The coordinator classifies task kind, complexity and risk. Default effort is never inherited from the vendor or the user's current model.
 
 ```sh
-python3 /path/to/skills/zcode/scripts/zcode_job.py --state /absolute/private/jobs delegate \
-  --repo /absolute/synthetic-repo --task-id SMOKE-1 --prompt-file /absolute/task.txt \
-  --provider-id EXISTING_BUILTIN_PROVIDER_ID --model-id EXISTING_ENABLED_MODEL_ID \
-  --reasoning-level ADVERTISED_LEVEL
+python3 /path/to/skills/zcode/scripts/zcode_job.py --state /absolute/private/jobs route --task-kind mechanical --complexity simple --risk normal
+python3 /path/to/skills/zcode/scripts/zcode_job.py --state /absolute/private/jobs doctor
+python3 /path/to/skills/zcode/scripts/zcode_job.py --state /absolute/private/jobs delegate --repo /absolute/authorized-repo --task-id STORY-1 --prompt-file /absolute/task.txt --task-kind routine --complexity bounded --risk normal --provider-id account:zai-individual-coding-plan --timeout 600
+python3 /path/to/skills/zcode/scripts/zcode_job.py --state /absolute/private/jobs status JOB_ID
+python3 /path/to/skills/zcode/scripts/zcode_job.py --state /absolute/private/jobs result JOB_ID
+python3 /path/to/skills/zcode/scripts/zcode_job.py --state /absolute/private/jobs resume JOB_ID --prompt-file /absolute/followup.txt --task-kind routine --complexity bounded --risk normal
+python3 /path/to/skills/zcode/scripts/zcode_job.py --state /absolute/private/jobs cancel JOB_ID
 ```
 
-These are wrapper options, not ZCode CLI flags. The wrapper checks the installed desktop catalog, creates a job-local provider configuration containing only model selection, and points the documented `ZCODE_PERSONAL_PROVIDER_CONFIG_FILE` environment variable there. It copies no user configuration, tokens, keys or endpoints. Existing credentials remain read-only, the global default stays unchanged, and resume uses the same selection. Account entitlement is still enforced by ZCode; catalog presence alone does not establish account readiness. Other CLI layouts currently reject this option rather than guessing resource paths.
+`--task-kind` is required; supported kinds are mechanical, routine, capability, debugging, architecture and ui-state. `visual` is explicitly refused. Complexity is simple/bounded/hard; risk is normal/ambiguous/security/data-loss/cross-service. The provider must be explicit and already authorized. Optional `--model-id` / `--reasoning-level` act as matching assertions against the policy; mismatches fail rather than override it. A follow-up requiring a different route becomes a newly bounded task after reviewing existing work, not a silently switched session. Legacy jobs without routing evidence cannot be resumed.
 
-During the real synthetic test, a catalog-enabled `GLM-5.3` selection with advertised reasoning level `low` for the existing Z.AI coding-plan provider still produced `Select a model before sending a message`. Source inspection established why this can happen: the standalone account runtime requires provider account-link identity metadata before it exposes account models. That metadata was absent, even though the desktop had account credentials. No metadata or credentials were copied, repaired or created. The isolated Codex CLI configuration had no login, while the normal Codex CLI was already logged in. No credentials were copied to make a nested isolated CLI run. A later test can reuse normal auth with `codex exec --ephemeral --ignore-user-config` and an explicit local skill-path instruction; this does not install the plugin persistently. The active Codex coordinator exercised the real wrapper initialization path; full nested CLI execution remains unverified.
+The adapter uses the inspected `app-server --stdio` interface. It verifies the same-process session's effective model, effort and mode before sending task text, then sends explicit model selection. Only accepted input/turn-correlated results can complete. Unknown/mismatched routes, unsupported transport mappings and unknown host callbacks fail closed. The only host preference callback returns a fixed restrictive, nonsecret configuration. It never returns credentials or grants approvals. A temporary selection profile and control settings are child-unwritable; global defaults and account linkage are unchanged.
 
-The required user-controlled setup is to connect the existing account through the installed ZCode standalone CLI's supported login flow, then use `/model` in its TUI to confirm an available model. For the verified desktop bundle, make its existing resources visible first:
+## Current live readiness and setup
+
+**Real inference is not validated.** On the inspected ZCode 0.17.0 installation, the latest non-inference preflight reached `session/create` and was refused because the requested `account:zai-individual-coding-plan/GLM-5.3-Flash` model was absent from that process's registry. No `session/send`, effective route, model response or edits followed. Earlier standalone headless tests also lacked required account-link identity/auth-source metadata, even though desktop OAuth credentials existed. No credential metadata was created or copied.
+
+The supported user-side account setup uses the existing account through ZCode's CLI/TUI, with the installed bundle's resource paths:
 
 ```sh
 export ZCODE_BUILTIN_PROVIDER_CONFIG_FILE='/Applications/ZCode.app/Contents/Resources/config/provider/zcode-builtin.json'
@@ -64,17 +56,16 @@ node '/Applications/ZCode.app/Contents/Resources/glm/zcode.cjs' login zai
 node '/Applications/ZCode.app/Contents/Resources/glm/zcode.cjs'
 ```
 
-The login command is shown for Z.AI; use the existing configured family, not a new billing account. It writes account-link/authentication state and therefore was **not run** during validation. In the TUI, `/model` lists/selects a model and persists a normal default; select it only when you want that persistent change. A job-local model selection can avoid changing that default once standalone account access is ready. Afterwards repeat a disposable real task; do not treat mocks or plugin discovery as proof of authentication.
+Use the already configured family rather than a new billing account. Login writes account-link/authentication state and was not run during validation. `/model` and `/effort` in the TUI persist normal defaults; use them only when you intend that change. A job-local selection avoids global model-default edits once a supported registry is available. **CLI account setup alone is not proof that the separate app-server host/account registry is ready**: the app-server source expects host-managed account configuration. A supported host/account integration must expose the exact route in its snapshot. Until that is available and tested, this wrapper refuses before inference; it does not copy credentials or fake a successful route.
 
-## Scope and limits
+Normal Codex CLI authentication was available. Isolated test Codex configurations lacked login, which does not imply normal Codex is unavailable. A later test can reuse normal auth with `codex exec --ephemeral --ignore-user-config` and an explicit local skill-path instruction, after the downstream route prerequisite is resolved. That full live flow is not claimed as passed.
 
-- This release requires macOS `sandbox-exec` and `ps` process inspection; other operating systems fail execution clearly. A host denying either capability must authorize normal local process access; the wrapper never requests elevated permissions itself.
-- ZCode receives an explicit `edit` or `plan` mode. Headless command approvals cannot be answered, so Bash is removed. File editing is supported; running tests is Codex's job. No approval broker or yolo fallback exists.
-- User extensions are disabled in isolated HOME. Project/ancestor `zcode.json`, `.zcode/config.json`, or `.env` files are refused because they can override runtime restrictions. This intentional limit may exclude existing repositories until those settings receive a deliberate integration design.
-- The macOS sandbox allows writes only in that job's runtime and worktree, plus `/dev/null`. Registry/reports, selection-only provider profiles, isolated HOME control settings and credentials are unwritable by the child. It does not isolate read access or provider networking. Only delegate repositories authorized for that provider. Prompt text is stored privately, not automatically scrubbed: never include secrets. Output redaction is conservative/best effort; credential-like assignment strings are dropped as a unit, and known token patterns are removed. Do not publish logs without review.
-- Captured stdout and stderr are each capped at 1 MiB; individual unterminated lines at 256 KiB. A 16 MiB runtime-storage watchdog checks every 0.5 seconds and stops the job on excess; transient overshoot and CLI-native artifacts are possible. This is not a filesystem quota. Patches are capped at 1 MiB, with truncation marked. Untracked file contents remain in the reviewable worktree.
-- Timeout defaults to 600 seconds (maximum 86400). The supervisor owns a fresh process group and validates UID/start time/PGID before SIGTERM and SIGKILL. Cancellation is confirmed only in final status. If descendants outlive the leader, inspection fails or ownership changes, the job becomes `cleanup_required`/`interrupted` and resume is refused; detached processes outside the owned group are not guaranteed to be detected or cancelled. Bash/subagents are disabled and prompts forbid background work, reducing this surface.
-- Registry operations use file locks; each job has a supervisor lock and independent worktree/runtime. Worker loss is reported as interrupted rather than running forever. No automatic rollback, commits, merges, push or worktree deletion occurs.
-- A valid final result and zero exit code mean CLI completion only. Tool errors, permission denial, turn failure or non-idle final projection require review. Model is recorded only if observed; a job-local selection is recorded as configured, with inference still unverified until a real response arrives. Test attestations identify Codex as their source; ZCode's narrative is not proof of tests.
+## Registry, review and safety
 
-See PROVENANCE.md and the accompanying validation evidence for exact inspected sources and test results.
+The private 0700 state directory holds durable random IDs, detached worktrees, immutable control files, isolated writable runtime and attempt artifacts. Locks prevent duplicate supervisors. Source checkouts are not edited, though Git creates worktree metadata in their repositories. The `.git` pointer is protected by the child sandbox and fingerprinted before trusted Git inspection/resume; hooks and external diff/textconv helpers are disabled. Worktrees remain for review.
+
+Bash, workflows, subagents and external tools are removed; `Read/Write/Edit/Glob/Grep` are the protocol allowlist. Modes are explicit `edit`/`plan`; no yolo fallback or approval broker exists. Codex runs approved tests and records `record-test JOB_ID --argv-json '["python3","-m","unittest"]' --exit-code 0 --evidence-file /absolute/test-output.txt`. This records an attestation, not an executed command. Agent claims remain unverified. Reports include requested/effective route, rationale/version/evidence, task/prompt hash, base/final SHA, session/input/turn/trace IDs, changed files, tests, blockers and exit status. Untracked files require direct inspection; Git diff does not include their contents.
+
+The write sandbox permits only job runtime/worktree writes, excluding `.git`; it does not isolate global reads or provider networking. Delegate only authorized repositories. Project/ancestor `zcode.json`, `.zcode/config.json` and `.env` are refused. Never put secrets in prompts. Output redaction is conservative/best effort; credential-like assignment strings can be dropped as a unit. Captured stdout/stderr are each capped at 1 MiB, lines at 256 KiB; a 16 MiB runtime watchdog can overshoot transiently. Patches are capped at 1 MiB with truncation marked.
+
+Cancellation is a request until final status confirms it; partial work remains. Ownership mismatches, surviving groups or unavailable inspection require manual cleanup, never blind PID signalling. No commits, merges, pushes, deployments, permission changes, credential creation or rollback occur automatically.

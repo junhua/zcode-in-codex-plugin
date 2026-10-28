@@ -12,7 +12,7 @@ codex=json.loads((p/'.codex-plugin/plugin.json').read_text())
 market=json.loads((root/'.agents/plugins/marketplace.json').read_text())
 assert portable['$schema']=='https://agent-plugins.org/schemas/1.0.0/plugin.schema.json'
 assert portable['name']==codex['name']=='zcode-coordinator'
-assert portable['version']==codex['version']=='0.2.0'
+assert portable['version']==codex['version']=='0.3.0'
 assert portable['license']==codex['license']=='Apache-2.0'
 assert codex['skills']=='./skills/'
 assert market['plugins'][0]['source']['path']=='./plugins/zcode-coordinator'
@@ -21,6 +21,8 @@ assert (p/'LICENSE').is_file() and (p/'NOTICE').is_file()
 skill=p/'skills/zcode/SKILL.md';text=skill.read_text()
 assert text.startswith('---\n') and '\nname: zcode\n' in text
 assert (p/'skills/zcode/scripts/zcode_job.py').is_file()
+assert (p/'skills/zcode/scripts/policy.py').is_file() and (p/'skills/zcode/scripts/protocol_bridge.py').is_file()
+assert (p/'ROUTING.md').is_file()
 assert (p/'tests/test_jobs.py').is_file() and (p/'tests/fake_zcode.py').is_file()
 for f in root.rglob('*'):
     if '.git' in f.parts or not f.is_file():continue

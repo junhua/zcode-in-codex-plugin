@@ -1,3 +1,5 @@
+test_active_boundary_stops_and_retains_work (test_jobs.JobsTest.test_active_boundary_stops_and_retains_work) ... ok
+test_async_admission_races_never_send (test_jobs.JobsTest.test_async_admission_races_never_send) ... ok
 test_auth_failure_redaction (test_jobs.JobsTest.test_auth_failure_redaction) ... ok
 test_bounded_logs_and_redaction (test_jobs.JobsTest.test_bounded_logs_and_redaction) ... ok
 test_cancel (test_jobs.JobsTest.test_cancel) ... ok
@@ -5,30 +7,45 @@ test_cancel_tree (test_jobs.JobsTest.test_cancel_tree) ... ok
 test_concurrent_jobs (test_jobs.JobsTest.test_concurrent_jobs) ... ok
 test_exec_process_identity_timeout (test_jobs.JobsTest.test_exec_process_identity_timeout) ... ok
 test_failure (test_jobs.JobsTest.test_failure) ... ok
+test_git_pointer_tampering_blocks_resume_before_git_inspection (test_jobs.JobsTest.test_git_pointer_tampering_blocks_resume_before_git_inspection) ... ok
 test_interrupted_not_running_forever (test_jobs.JobsTest.test_interrupted_not_running_forever) ... ok
 test_invalid_job_id_and_state (test_jobs.JobsTest.test_invalid_job_id_and_state) ... ok
+test_known_host_preferences_are_restricted_and_unknown_requests_refused (test_jobs.JobsTest.test_known_host_preferences_are_restricted_and_unknown_requests_refused) ... ok
 test_leader_exits_first_cleanup_required (test_jobs.JobsTest.test_leader_exits_first_cleanup_required) ... ok
+test_malformed_protocol_field_types (test_jobs.JobsTest.test_malformed_protocol_field_types) ... ok
 test_missing_cli (test_jobs.JobsTest.test_missing_cli) ... ok
 test_no_session_resume_rejected (test_jobs.JobsTest.test_no_session_resume_rejected) ... ok
 test_ownership_refuses_foreign_process (test_jobs.JobsTest.test_ownership_refuses_foreign_process) ... ok
+test_peak_blocks_before_repo_or_cli (test_jobs.JobsTest.test_peak_blocks_before_repo_or_cli) ... ok
 test_project_and_ancestor_config_refused (test_jobs.JobsTest.test_project_and_ancestor_config_refused) ... ok
 test_protocol_errors (test_jobs.JobsTest.test_protocol_errors) ... ok
 test_quoted_secret_result (test_jobs.JobsTest.test_quoted_secret_result) ... ok
 test_record_test_attestation (test_jobs.JobsTest.test_record_test_attestation) ... ok
 test_resume (test_jobs.JobsTest.test_resume) ... ok
 test_resume_active_rejected (test_jobs.JobsTest.test_resume_active_rejected) ... ok
+test_resume_peak_block_then_eighteen_allowed (test_jobs.JobsTest.test_resume_peak_block_then_eighteen_allowed) ... ok
 test_runtime_log_watchdog (test_jobs.JobsTest.test_runtime_log_watchdog) ... ok
 test_scope_environment (test_jobs.JobsTest.test_scope_environment) ... ok
 test_selection_catalog_validation (test_jobs.JobsTest.test_selection_catalog_validation) ... ok
 test_selection_pair_required_and_bundle_verified (test_jobs.JobsTest.test_selection_pair_required_and_bundle_verified) ... ok
 test_selection_profile_is_secret_free_and_scoped (test_jobs.JobsTest.test_selection_profile_is_secret_free_and_scoped) ... ok
+test_session_and_workspace_scope_refused_before_send (test_jobs.JobsTest.test_session_and_workspace_scope_refused_before_send) ... ok
+test_status_doctor_result_route_allowed_in_peak (test_jobs.JobsTest.test_status_doctor_result_route_allowed_in_peak) ... ok
 test_structured_error_events (test_jobs.JobsTest.test_structured_error_events) ... ok
 test_success_result_traceability_spaces (test_jobs.JobsTest.test_success_result_traceability_spaces) ... ok
+test_terminal_requires_correlated_accepted_input (test_jobs.JobsTest.test_terminal_requires_correlated_accepted_input) ... ok
 test_timeout (test_jobs.JobsTest.test_timeout) ... ok
 test_tool_permission (test_jobs.JobsTest.test_tool_permission) ... ok
+test_unknown_or_mismatched_effective_route_never_sends (test_jobs.JobsTest.test_unknown_or_mismatched_effective_route_never_sends) ... ok
 test_write_sandbox_scope (test_jobs.JobsTest.test_write_sandbox_scope) ... ok
+test_active_guard_rechecks_current_day_after_clock_rewind (test_policy.PolicyTest.test_active_guard_rechecks_current_day_after_clock_rewind) ... ok
+test_budget_deadline_and_equality (test_policy.PolicyTest.test_budget_deadline_and_equality) ... ok
+test_daily_exact_boundaries_and_buffer (test_policy.PolicyTest.test_daily_exact_boundaries_and_buffer) ... ok
+test_routes_are_explicit_cost_heuristics (test_policy.PolicyTest.test_routes_are_explicit_cost_heuristics) ... ok
+test_timezone_conversion_dst_independent (test_policy.PolicyTest.test_timezone_conversion_dst_independent) ... ok
+test_unknown_or_mismatched_effective_routes_fail (test_policy.PolicyTest.test_unknown_or_mismatched_effective_routes_fail) ... ok
 
 ----------------------------------------------------------------------
-Ran 29 tests in 18.015s
+Ran 46 tests in 44.710s
 
 OK

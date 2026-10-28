@@ -1,39 +1,41 @@
-# Independent review — ZCode Coordinator 0.2.0
+# Independent review — ZCode Coordinator 0.3.0
 
-**Implementation conclusion: passed for the documented macOS scope.** No blocking code findings remain in the reviewed wrapper. Real inference, editing, authentication readiness and real session resume have not been established. This report does not attest to a Git push, release, or successful live end-to-end run.
+**Conclusion: implementation and public-content review passed for the documented macOS scope. No blocking findings remain in this candidate.** This is approval of the reviewed guardrails and publication content, not a claim of successful real ZCode inference or a perfect remote processing/billing cutoff.
 
-Reviewed wrapper: `skills/zcode/scripts/zcode_job.py` in the plugin package.
+## Reviewed runtime fingerprints
 
-**SHA-256:** `27a375f42d34fab64c479e655a3aeea0a85a029012262b9190d92fc96826a099`.
+Paths below are relative to `plugins/zcode-coordinator/skills/zcode/scripts/`:
 
-## Independent evidence
+| Module | SHA-256 |
+| --- | --- |
+| `zcode_job.py` | `90c6db8cd21fa1f1192fa68e1ff5a9ec2aa09d428396f7a2cebe5de65129633a` |
+| `policy.py` | `0e09f2b9e6daba60a1b69f71de9e184ec10c6c8786684863779b54f999df807f` |
+| `protocol_bridge.py` | `6d6be7d73f36bb8f54084dcb81651a549107aa987d2897c8d51a09705b164b06` |
 
-The reviewer independently ran:
+## Independent validation
 
-```sh
-PYTHONDONTWRITEBYTECODE=1 python3.13 -m unittest discover -s tests -p 'test_jobs.py' -v
-```
+- A full **45-test independent fixture run passed in 44.559 seconds**. After the final small current-day cutoff correction, all **six pure-policy tests** and the **active-boundary integration test** passed again. Together these runs cover the current 46 distinct cases. The implementation agent also recorded a full final 46-test pass.
+- An additional **23,040 independent minute/budget admission checks** across multiple dates passed. Fixed UTC+08 exclusion, the 60-second buffer, timeout equality and timezone/DST conversion match the intended daily rule.
+- Four additional direct stdio fixtures passed: terminal-before-ACK acceptance, terminal-before-rejected-ACK refusal, stale-input terminal exclusion, and requested-plan/effective-edit refusal before task submission.
+- The restricted runtime-preferences callback and refusal of an unknown credential request passed independently. Its fixed response was checked against the pinned protocol schema: empty additional directories, search/tool search off, subagents/memory/automatic question resolution off, and the documented context-budget strategy. It supplies no credentials or approval.
+- Synthetic integration tests exercise the actual macOS sandbox and process controls, including protected job/control files, selection profile, isolated HOME and `.git` pointer; ownership checks; group cleanup; retained partial work; and refusal after Git-pointer tampering.
 
-**29 tests passed in 17.907 seconds.** All model/service behavior in this suite uses fake CLI fixtures and disposable synthetic Git repositories. It covers existing lifecycle/scope/protocol guarantees plus account-catalog selection validation, missing/invalid option rejection, and secret-free job-local profile generation. No model/provider requests, user repositories, installed configuration changes, or credential edits were performed by the reviewer.
+Tests use fake CLI/stdin servers and disposable synthetic repositories. They copy runtime scripts and inject only fixture clock/catalog data in those copies; no production policy-bypass option was added. The reviewer issued no real model/provider request, changed no global settings or credentials, and modified no implementation.
 
-A separate actual macOS sandbox test attempted to modify both the generated provider profile and isolated HOME configuration. Both writes were denied and both files' hashes remained unchanged. Runtime writes remained allowed. This verifies the revised boundary rather than merely checking profile path strings.
+## Findings addressed
 
-## Selection-path review
+The daily [14:00,18:00) UTC+08 policy applies to inference-bearing starts/resumes every day. Admission is repeated in the controller, supervisor and bridge, including after asynchronous preparation and immediately before task text is sent. Active jobs use wall time and a planned monotonic deadline; the final guard also catches a current-day cutoff after a clock rewind. Interruption retains local artifacts and requires explicit later resume.
 
-The wrapper accepts model/provider IDs only as wrapper arguments. It validates against the installed desktop bundle's built-in account catalog and rejects unsupported CLI layouts, custom endpoints, credential fields, unknown models and unsupported reasoning levels. Rule matching now uses whole-string matching consistent with the inspected source's anchored model patterns.
+The bounded same-process app-server adapter verifies provider/model/effort and exact permission mode, expected session ID and canonical local workspace before subscribing/sending. Client-generated session identity also scopes the sole permitted host callback. Explicit per-input selection has no configured fallback. Completion requires an accepted send ACK and matching input/turn IDs, with traceability preserved; a result cannot win a race against a rejected send. Unknown/mismatched routes, host actions, scopes and malformed protocol fields fail closed. Refusal evidence distinguishes input not attempted, attempted with unknown acceptance, and accepted input.
 
-The generated provider JSON contains only empty provider/model override collections and the selected provider/model/options. It copies no user configuration, key, token, or endpoint. The original provider configuration and account credentials remain outside the child's permitted write paths. Configured selection is recorded separately from proof that inference occurred, and resume retains the selection while revalidating the current catalog.
+The installed transport mapping is checked rather than assumed; relevant later overrides are rejected. Selection/control files remain child-unwritable. The `.git` indirection file is now protected by the sandbox and fingerprinted before trusted Git inspection/resume, preventing a delegated edit from redirecting supervisor plumbing into another checkout.
 
-The review identified that ZCode polls its personal provider file during execution. The initial writable-runtime placement could therefore allow the execution agent to alter a validated profile after launch. This finding is closed: both the selection file and isolated HOME configuration now live in a control directory outside child-write allowances. Existing registry/report protection, explicit permission mode, removed command tools, project/ancestor configuration rejection, owned cancellation and conservative cleanup states remain in place.
+## Research, readiness and publication
 
-## Live readiness and public delivery
+Reviewed [official GLM-5.3 documentation](https://docs.z.ai/guides/llm/glm-5.3) and [official Flash documentation](https://docs.z.ai/guides/vlm/glm-5.3-flash). The documented thinking/effort and modality facts support the public description; the routing matrix is correctly labeled a local cost-conscious heuristic, not a measured optimum or universal pricing claim. Media attachments are unsupported by this wrapper even though Flash supports native multimodal inputs.
 
-Observed real synthetic attempts selected the catalog-enabled GLM-5.3 model, including an advertised reasoning level, but exited before any session/model response or edits. The documented standalone account-link identity prerequisite explains the initialization blocker; existing desktop account credentials alone do not prove standalone provider readiness. The supported user-controlled login/model confirmation steps are accurately described, and no undocumented CLI model flag or copied-credential workaround was introduced. A nested isolated Codex CLI was not claimed as tested when it lacked login.
+The latest installed-interface preflight remained **failed before inference**: its account/host registry did not expose the requested Flash route. No `session/send`, effective route, response or edits were claimed. Public docs distinguish this from the earlier standalone account-link issue and do not promise that ordinary CLI login alone fixes app-server readiness. Unsupported setup is reported rather than bypassed or simulated.
 
-Public deliverables must keep this failed-live-test distinction, use the 0.2.0 validation/model-selection description, and exclude personal absolute paths, runtime databases/logs, account/provider state, private prompts and raw job registries. The implementation reviewer changed no implementation or global configuration; this report is the review artifact.
+Reviewed all **23 tracked/staged public files**; index blobs matched the inspected working files, with the superseded independent report to be replaced by this one. No personal machine paths, private job identifiers, raw runtime logs/databases, account state or machine-specific receipts were included. Versioned manifests, marketplace, skill, provenance, routing/validation docs, license/NOTICE, links and offline validation are consistent; staged diff checks passed. The reviewed origin is the explicitly requested `https://github.com/junhua/zcode-in-codex-plugin.git`.
 
-## Public staging closeout
-
-Reviewed the exact 19 staged files in the publication candidate. Staged blobs matched the inspected working files, including the reviewed wrapper hash and the same tests/fake CLI used for the independent run. No personal machine paths, private task/job identifiers, raw runtime logs/databases, account state, install/discovery receipts, or old-version validation were included. README, model setup, provenance and validation accurately distinguish fixture passes, installation/discovery and failed pre-inference live attempts. The public marketplace points to the packaged plugin, versions are 0.2.0, license/NOTICE are included, offline validation passes, and the staged diff has no whitespace errors. The documented future Codex flags were checked against actual installed help.
-
-The reviewed origin is the user-requested `https://github.com/junhua/zcode-in-codex-plugin.git`. No publication-content blockers remain for this candidate and that target. The reviewer performed no commit or push.
+No publication blockers remain once this current report replaces the superseded review and is staged. The reviewer performed no commit or push. Remote in-flight work, OS suspension/scheduling and surviving/escaped descendants remain disclosed limits; local cancellation is not an absolute provider-side cutoff guarantee.

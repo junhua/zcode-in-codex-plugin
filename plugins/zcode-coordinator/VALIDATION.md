@@ -1,29 +1,30 @@
-# Validation — 0.2.0
+# Validation — 0.3.0
 
-**Fixture-tested; real inference remains blocked by standalone account setup.**
+**Deterministic fixtures validate policy and supervisor behavior. Real model execution is not passed.**
 
-- All **29 synthetic fixture tests passed**. They cover success/result traceability, failure/auth-like failure, timeout, owned-group cancellation, resume, concurrency, malformed/truncated/oversize streams, quoted-secret redaction, runtime watchdog, process ownership, orphan detection, write-sandbox boundaries, rejected runtime configuration, coordinator test attestations and per-job selection validation.
-- An independent reviewer reran all 29 tests and separately checked the actual macOS sandbox: runtime/worktree writes are permitted; job/control files, the selection-only profile, isolated HOME configuration and outside files are protected.
-- Portable manifest was validated against its declared agent-plugins.org 1.0.0 JSON schema; the skill passed skill-creator validation. The repository includes offline structural checks for manifests, marketplace, skill, license and absence of personal machine paths.
-- Codex's supported marketplace/plugin commands installed and discovered the package in an isolated test configuration. No global plugin install or configuration changes were performed. Package installation is independent of model authentication.
+## Automated and independent checks
 
-## Real CLI attempts
+All **46 regression tests passed** on the release candidate. The fixture suite covers daily 13:59:59/14:00/17:59:59/18:00 boundaries, weekends, UTC+08 conversion across DST offsets, timeout/cutoff equality, current-day clock rewinds, resume exclusion and asynchronous create/subscribe races. It covers all six model/effort choices, visual-input refusal, unsupported/mismatched effective route/effort/mode/session/workspace, strict request/ACK/input/turn correlation, stale/early terminal messages and restricted host preferences.
 
-Installed versions inspected: **Codex CLI 0.156.1**, **ZCode CLI 0.17.0**, Node.js 26.5.0, macOS arm64.
+Existing success/failure/auth-like failure, bounded logs/redaction, malformed/truncated protocol, timeout/cancel/group ownership, orphan detection, runtime watchdog, concurrency, paths with spaces, scope controls, Git-pointer tampering, environment filtering and coordinator test attestations remain covered. Tests copy the runtime into disposable fixture directories and inject a clock/catalog there; no production time-policy bypass exists. They use a fake stdio server, not a model.
 
-A real disposable task used the installed desktop CLI and a selection-only profile for catalog-enabled **GLM-5.3**, reasoning **low**, on the already configured Z.AI coding-plan provider. It exited **1 before inference** with `Select a model before sending a message`. No ZCode session ID, model response or code edits were produced. Base and final synthetic repository SHA were equal. Real delegation, resume and cancellation are therefore **not passed**; repeated guaranteed-failing retries were stopped.
+Independent review checks runtime modules and staged public content, including actual macOS sandbox boundaries. The public review report records exact fingerprints and independent results. Portable and Codex manifests, marketplace, skill, licenses and archive layout are validated; installation is tested only in isolated Codex configurations, never globally.
 
-This is more than an ordinary model-picker issue: the standalone account runtime requires provider identity/auth-source link metadata. Those records were absent even though desktop OAuth credentials existed. No credentials, metadata, keys, account access or endpoints were copied, created or changed. The supported user-side prerequisite is the standalone CLI's existing-account connection flow, followed by model confirmation. See the usage guide's exact commands.
+## Real installed-interface check
 
-The normal Codex CLI reported already logged in using ChatGPT. The isolated test Codex configuration was not logged in; no secret copying was used to make it so. A later test can reuse normal auth via `codex exec --ephemeral --ignore-user-config` with an explicit local skill-path instruction. That route is recorded for later testing, not claimed as executed end to end.
+Inspected Codex CLI 0.156.1 and ZCode CLI 0.17.0 on macOS arm64, with the pinned source and bundle fingerprint in PROVENANCE.md. The installed catalog enables both requested models and advertises low/high/max. Its inspected Z.AI account Anthropic transport maps explicit effort to output_config.effort with thinking enabled. Other transport mappings/relevant overrides are rejected unless proven; expressions are not evaluated as arbitrary code.
 
-## Reproduce fixture validation
+A bounded real preflight outside the excluded window requested Flash/low in a disposable synthetic repository. It exercised app-server session/create and the source-documented nonsecret runtime-preferences callback with all optional capabilities disabled. The server refused because account:zai-individual-coding-plan/GLM-5.3-Flash was absent from that process's provider registry. **No session/send or model request followed, no effective route was claimed, and no edits occurred.**
 
-From the repository root:
+The earlier standalone account-link metadata blocker remains. The separate app-server source expects host-managed account configuration, so CLI login/model selection alone is not proof this adapter can verify a route. Unsupported account/host integration fails before inference. No credential copying, account-link changes, global defaults, provider endpoints or permissions were changed. Real inference, resumed inference, provider effort behavior and real boundary cancellation remain unverified. Cancellation of an in-flight remote request cannot guarantee immediate server-side processing/billing cessation.
+
+Normal Codex authentication was available; isolated test configurations lacking login do not imply normal Codex is unavailable. A future real test may reuse normal authentication with --ephemeral --ignore-user-config and an explicit local skill-path instruction once the downstream exact-route prerequisite is resolved.
+
+## Reproduce
 
 ```sh
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -v -s plugins/zcode-coordinator/tests -p 'test_*.py'
 python3 scripts/validate_package.py
 ```
 
-The test CLI is fake and uses synthetic Git repositories; these tests make no model requests and do not prove real provider authentication or model quality. Private runtime logs, session databases, machine-specific installation receipts and user account data are excluded from the public package.
+Private runtime logs, session databases, account metadata, machine-specific receipts and unrelated source are excluded from the public repository/package. See the usage guide for supported setup steps and precise no-use/cancellation limitations.
